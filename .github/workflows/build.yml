@@ -21,6 +21,19 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Heal & pin pip
+        run: |
+          set -e
+          # 1) ensurepip 从 Python 内置 wheel 重新提取一份自洽的 pip，不依赖当前
+          #    可能已被半升级损坏的 pip（直接 `python -m pip` 都可能 import 失败）。
+          python -m ensurepip --upgrade
+          # 2) 锁定 pip==23.3.2：其 vendored 的 resolvelib(1.0.1) 仍导出
+          #    RequirementInformation，而 p4a 引导 venv 时依赖该符号。新版 pip
+          #    (>=24.1) 把该符号从 struct 里删了，会导致 `pip install -U pip` 自身
+          #    ImportError，整包构建直接挂掉。venv 继承这份健康 pip 即可。
+          python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
+          python -m pip --version
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -32,16 +45,10 @@ jobs:
 
       - name: Install Buildozer
         run: |
-          # 1) 先还原一个干净可用的 pip。GitHub runner 自带的 pip 有时是被半升级
-          #    损坏的状态（pip 自身 import resolvelib 就炸），ensurepip 还原 Python
-          #    自带的那份（自洽，可正常运行）。
-          python -m ensurepip --force 2>/dev/null || python -m ensurepip
-          # 2) 锁定 pip==23.3.2。它 vendored 的 resolvelib 0.8.1 仍导出
-          #    RequirementInformation，而 p4a 引导 venv 时依赖这个符号；更新版
-          #    pip（>=24.1）把该符号从 struct 里删了，会导致 `pip install -U pip`
-          #    自身 ImportError，整包构建直接挂掉。venv 继承这份健康 pip 即可。
-          python -m pip install --force-reinstall --no-cache-dir "pip==23.3.2"
-          pip install buildozer "cython==0.29.33"
+          set -e
+          python -m pip install buildozer "cython==0.29.33"
+          # 安装 buildozer 可能顺带改动 pip，再次锁定确保后续 venv 继承健康 pip。
+          python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
 
       - name: Validate (logic self-test)
         # 只跑纯逻辑自测（不依赖 kivy）。main 的 kivy import 校验
@@ -76,7 +83,6 @@ jobs:
           : > build.log
 
           # 手动接受 license（SDK 已存在时有意义；cache miss 时 SDK 目录不存在则跳过）。
-          # find 失败用 || true 兜底，避免 cache miss 时 set -e 在脚本早期直接退出。
           SDKMANAGER=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1 || true)
           echo "USING sdkmanager = ${SDKMANAGER:-NOT FOUND}" | tee -a build.log
           if [ -n "$SDKMANAGER" ]; then
@@ -86,21 +92,28 @@ jobs:
             "$SDKMANAGER" --sdk_root="$SDK" "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 | tee -a build.log || true
           fi
 
-          # 第一次构建：让 buildozer 克隆 p4a 并解出/编译所有 recipe 源码。
-          # 这一步会在 p4a 的 `pip install -U pip` 处失败（已用 || true 兜底），
-          # 但 p4a 目录已经就位、recipe 也已编译完成，第二次构建可直接复用。
+          # 第一次构建：让 buildozer 克隆 p4a 并解出/编译所有 recipe 源码（耗时最长）。
+          # 这一步会在 p4a 的 `pip install -U pip` 处失败（已用 || true 兜底），但 p4a
+          # 目录已经就位、recipe 也已编译完成，第二次构建可直接复用。
           echo "=== first build (clone p4a + compile recipes; pip step expected to fail) ===" | tee -a build.log
           yes | python -m buildozer android debug 2>&1 | tee -a build.log || true
 
-          # 克隆出 p4a 后，把强制升级 pip 的那行 sed 掉。venv 会继承上面锁定的
-          # 健康 pip 23.3.2，不再自我升级到坏的版本。
+          # 克隆出 p4a 后，把强制升级 pip 的所有写法都 sed 成 no-op(true)。
+          # 用正则匹配，不依赖引号风格（旧写法 "source venv/bin/activate && pip install -U pip"
+          # 用双引号 sed 匹配不到单引号源码，所以之前没生效）。
           P4A_DIR=$(find . -type d -name python-for-android -path '*.buildozer*' 2>/dev/null | head -1 || true)
           echo "P4A_DIR=${P4A_DIR:-NOT FOUND}" | tee -a build.log
           if [ -n "$P4A_DIR" ]; then
             BUILD_PY="$P4A_DIR/pythonforandroid/build.py"
             echo "=== patch p4a build.py (disable forced pip self-upgrade) ===" | tee -a build.log
-            sed -i 's|"source venv/bin/activate && pip install -U pip"|"source venv/bin/activate && true"|' "$BUILD_PY"
-            echo "remaining 'pip install -U pip' occurrences: $(grep -c 'pip install -U pip' "$BUILD_PY" || true)" | tee -a build.log
+            sed -i -E 's/(pip3?|python -m pip) install -U pip/true/g' "$BUILD_PY"
+            echo "remaining forced pip-upgrade occurrences: $(grep -cE '(pip3?|python -m pip) install -U pip' "$BUILD_PY" || true)" | tee -a build.log
+            # 删掉上一次已生成、可能已被升级成损坏版本的 venv，让第二次构建用健康的基础
+            # pip(23.3.2) 重新创建。
+            find .buildozer -type d -name venv -exec rm -rf {} + 2>/dev/null || true
+            echo "removed stale venv(s)" | tee -a build.log
+            # 再次锁定 host pip，防止第一次构建里 recipe 编译阶段把它顶到坏版本。
+            python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
           fi
 
           # 真正编译 + 打包（p4a 已 patch，pip 健康）。recipe 在第一次已编译，这里复用。

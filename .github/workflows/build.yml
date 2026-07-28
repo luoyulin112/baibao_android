@@ -114,6 +114,16 @@ jobs:
             echo "removed stale venv(s)" | tee -a build.log
             # 再次锁定 host pip，防止第一次构建里 recipe 编译阶段把它顶到坏版本。
             python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
+
+            # 修复 AAB 版本门槛误报：p4a 是从 git 克隆的（未被 pip 安装），其
+            # __version__ 会回退成 "0.0.0"，导致 buildozer 的 AAB 支持门槛
+            # (< 2023.08.09) 误判 p4a 太旧而直接中止（所有 recipe 其实都已编译
+            # 成功，唯独最后的 toolchain aab 探针被拦）。这里先把 tag 拉下来让
+            # setuptools_scm/git-describe 能算出真实版本，再把静态回退值直接写成
+            # 带 AAB 支持的 2026.5.9 作为兜底，确保 buildozer 放行。
+            git -C "$P4A_DIR" fetch --tags --depth 1 2>/dev/null || true
+            sed -i -E 's/^([[:space:]]*)__version__[[:space:]]*=[[:space:]]*.*/\1__version__ = "2026.5.9"/' "$P4A_DIR/pythonforandroid/__init__.py"
+            echo "p4a __version__ now: $(grep -E '__version__' "$P4A_DIR/pythonforandroid/__init__.py" | head -1)" | tee -a build.log
           fi
 
           # 真正编译 + 打包（p4a 已 patch，pip 健康）。recipe 在第一次已编译，这里复用。

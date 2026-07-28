@@ -39,15 +39,31 @@ jobs:
         # 留给 buildozer android debug 阶段，编译期会自动暴露。
         run: python selftest.py
 
+      - name: Cache Buildozer SDK/NDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            ~/.gradle
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+
       - name: Build APK (debug)
         env:
           # 避免交互式提示
           BUILDOZER_WARN_ON_ROOT: "0"
         run: |
           set -eo pipefail
-          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
           export PATH=$PATH:~/.local/bin
-          python -m buildozer android debug 2>&1 | tee build.log
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          # 第一次构建：触发 SDK/NDK 下载（干净环境会在 license 处失败，忽略）
+          python -m buildozer android debug 2>&1 | tee /tmp/b1.log || true
+          # 显式接受所有 Android SDK license（绕过 buildozer 自动接受失效）
+          if [ -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          fi
+          # 第二次构建：SDK 已就绪且 license 已接受，进入真实编译
+          python -m buildozer -v android debug 2>&1 | tee build.log
           echo "=== bin/ 内容 ==="
           ls -la bin/ 2>/dev/null || echo "bin/ 不存在"
           echo "=== 全盘查找 apk ==="

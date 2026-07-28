@@ -34,7 +34,7 @@ android.permissions =
 android.api = 34
 android.minapi = 24
 android.ndk = 25b
-android.sdk = 34
+android.build_tools_version = 34.0.0
 
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
 android.accept_licenses = True

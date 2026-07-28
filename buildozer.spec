@@ -18,6 +18,17 @@ source.exclude_dirs = .venv,__pycache__,tests
 # (list) 应用要求（python3 + kivy）
 requirements = hostpython3==3.11.9, python3==3.11.9, kivy==2.3.1
 
+# (str) python-for-android 来源：使用已修复 pip 自升级问题的 fork。
+# 原生 kivy/p4a 在 run_pymodules_install 里无条件执行 `pip install -U pip`，
+# 会把引导 venv 的 pip 半升级成混合态，触发
+#   ImportError: cannot import name 'RequirementInformation'
+# 导致整个 APK 构建失败。fork 已将该步改为锁定 pip==23.3.2（其 vendored
+# resolvelib 1.0.1 仍导出 RequirementInformation，自洽）。buildozer 按此分支
+# 检出，git 复位也不会撤销修复（这是之前在 build.yml 里 sed 改 p4a 源码必败的
+# 根因：buildozer 每次构建都会对 p4a 做 checkout/reset，撤销 sed 补丁）。
+p4a.url = https://github.com/luoyulin112/python-for-android.git
+p4a.branch = master
+
 # (str) 应用主类（Kivy App 类名，buildozer 会自动找 main.py 里的 App）
 # 不填时 buildozer 默认加载 main.py 中第一个 App 子类
 
@@ -39,11 +50,8 @@ android.build_tools_version = 34.0.0
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
 android.accept_licenses = True
 
-# grpmodule.c patch 不通过 spec 选项实现（buildozer 1.5.x 没暴露 local_recipe 机制），
-# 而是放到 .github/workflows/build.yml 里：buildozer 第一次跑让 p4a 把 python3 源码
-# 解压完整（grp 编译失败也无妨），第二次跑前用 .github/scripts/patch_grpmodule.py
-# 在解压后的 grpmodule.c 里 wrap setgrent/getgrent/endgrent 为 #if 0，p4a 第二次跑
-# 检测源码已存在会跳过 unpack，用已 patch 源码继续编译通过。
+# grpmodule.c 的 implicit-declaration 警告属于非致命假线索（p4a 会继续编译通过），
+# 不需要在 spec 里做任何特殊处理。
 
 # (bool) 是否显示启动图
 android.private_storage = True

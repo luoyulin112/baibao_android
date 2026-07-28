@@ -24,13 +24,10 @@ jobs:
       - name: Heal & pin pip
         run: |
           set -e
-          # 1) ensurepip 从 Python 内置 wheel 重新提取一份自洽的 pip，不依赖当前
-          #    可能已被半升级损坏的 pip（直接 `python -m pip` 都可能 import 失败）。
+          # ensurepip 从 Python 内置 wheel 重新提取一份自洽的 pip（不依赖可能被
+          # 半升级损坏的当前 pip），随后锁定到 23.3.2。这只是宿主 pip，真正决定
+          # 构建成败的是 p4a 引导 venv 里的 pip——那一步已在 p4a fork 里锁到 23.3.2。
           python -m ensurepip --upgrade
-          # 2) 锁定 pip==23.3.2：其 vendored 的 resolvelib(1.0.1) 仍导出
-          #    RequirementInformation，而 p4a 引导 venv 时依赖该符号。新版 pip
-          #    (>=24.1) 把该符号从 struct 里删了，会导致 `pip install -U pip` 自身
-          #    ImportError，整包构建直接挂掉。venv 继承这份健康 pip 即可。
           python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
           python -m pip --version
 
@@ -47,7 +44,6 @@ jobs:
         run: |
           set -e
           python -m pip install buildozer "cython==0.29.33"
-          # 安装 buildozer 可能顺带改动 pip，再次锁定确保后续 venv 继承健康 pip。
           python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
 
       - name: Validate (logic self-test)
@@ -92,62 +88,10 @@ jobs:
             "$SDKMANAGER" --sdk_root="$SDK" "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 | tee -a build.log || true
           fi
 
-          # 第一次构建：让 buildozer 克隆 p4a 并解出/编译所有 recipe 源码（耗时最长）。
-          # 这一步会在 p4a 的 `pip install -U pip` 处失败（已用 || true 兜底），但 p4a
-          # 目录已经就位、recipe 也已编译完成，第二次构建可直接复用。
-          echo "=== first build (clone p4a + compile recipes; pip step expected to fail) ===" | tee -a build.log
-          yes | python -m buildozer android debug 2>&1 | tee -a build.log || true
-
-          # 克隆出 p4a 后，把强制升级 pip 的所有写法都 sed 成 no-op(true)。
-          # 用正则匹配，不依赖引号风格（旧写法 "source venv/bin/activate && pip install -U pip"
-          # 用双引号 sed 匹配不到单引号源码，所以之前没生效）。
-          P4A_DIR=$(find . -type d -name python-for-android -path '*.buildozer*' 2>/dev/null | head -1 || true)
-          echo "P4A_DIR=${P4A_DIR:-NOT FOUND}" | tee -a build.log
-          if [ -n "$P4A_DIR" ]; then
-            BUILD_PY="$P4A_DIR/pythonforandroid/build.py"
-            echo "=== patch p4a: neutralize ALL forced pip self-upgrades ===" | tee -a build.log
-            find "$P4A_DIR" -name '*.py' -print0 | xargs -0 sed -i -E 's/(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip/true/g'
-
-            echo "=== patch p4a: build run_pymodules_install venv with build-machine python ===" | tee -a build.log
-            # root cause: run_pymodules_install uses the cross-built host_python to run
-            #   `host_python -m venv venv`
-            # but hostpython3(desktop) stdlib lacks a runnable venv.__main__ ->
-            #   "No module named venv.__main__". That venv only installs pure-python
-            # deps (certifi/requests/...) into the android site-packages, so creating
-            # it with the build-machine python (sys.executable, full venv) is correct;
-            # --clear keeps it idempotent across rebuilds.
-            sed -i -E "s/shprint(host_python, '-m', 'venv', 'venv')/shprint(sh.Command(sys.executable), '-m', 'venv', '--clear', 'venv')/" "$BUILD_PY"
-            grep -q "sh.Command(sys.executable)" "$BUILD_PY" || { echo "PATCH FAILED: venv-creation line not patched"; exit 1; }
-            echo "venv-creation patched: $(grep -n "sys.executable" "$BUILD_PY" | head -1)" | tee -a build.log
-
-            # FORCE recompile of patched p4a sources: the first build already imported
-            # pythonforandroid.build and wrote a compiled __pycache__/*.pyc that STILL
-            # contains the ORIGINAL `pip install -U pip`. Python would otherwise keep
-            # executing that stale bytecode (grep of the .pyc confirmed it), so the sed
-            # above never takes effect and the venv pip still gets upgraded to the
-            # broken 25.x -> "ImportError: cannot import name 'RequirementInformation'".
-            # Dropping the bytecode guarantees p4a recompiles from the patched source.
-            find "$P4A_DIR" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
-
-            # again lock host pip (cheap, idempotent) and verify the patch truly landed
-            # in source and that no stale .pyc remains to override it.
-            python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
-            echo "remaining forced pip-upgrade occurrences in .py: $(grep -rlE --include='*.py' '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$P4A_DIR" 2>/dev/null | head || true)" | tee -a build.log
-            echo "remaining stale __pycache__ dirs (should be none): $(find "$P4A_DIR" -name '__pycache__' -type d | head || true)" | tee -a build.log
-
-            # 修复 AAB 版本门槛误报：p4a 是从 git 克隆的（未被 pip 安装），其
-            # __version__ 会回退成 "0.0.0"，导致 buildozer 的 AAB 支持门槛
-            # (< 2023.08.09) 误判 p4a 太旧而直接中止（所有 recipe 其实都已编译
-            # 成功，唯独最后的 toolchain aab 探针被拦）。这里先把 tag 拉下来让
-            # setuptools_scm/git-describe 能算出真实版本，再把静态回退值直接写成
-            # 带 AAB 支持的 2026.5.9 作为兜底，确保 buildozer 放行。
-            git -C "$P4A_DIR" fetch --tags --depth 1 2>/dev/null || true
-            sed -i -E 's/^([[:space:]]*)__version__[[:space:]]*=[[:space:]]*.*/\1__version__ = "2026.5.9"/' "$P4A_DIR/pythonforandroid/__init__.py"
-            echo "p4a __version__ now: $(grep -E '__version__' "$P4A_DIR/pythonforandroid/__init__.py" | head -1)" | tee -a build.log
-          fi
-
-          # 真正编译 + 打包（p4a 已 patch，pip 健康）。recipe 在第一次已编译，这里复用。
-          echo "=== real build ===" | tee -a build.log
+          # 单次干净构建：p4a fork 已把致命的 `pip install -U pip` 改为锁定 pip==23.3.2，
+          # 不再需要在构建脚本里 sed 改 p4a 源码（buildozer 每次构建都会 git 复位 p4a，
+          # 之前的 sed 补丁必然被撤销，这正是连续多次构建都失败的根因）。
+          echo "=== build (p4a fork neutralizes the fatal pip self-upgrade) ===" | tee -a build.log
           yes | python -m buildozer -v android debug 2>&1 | tee -a build.log
           echo "=== bin/ ===" | tee -a build.log
           ls -la bin/ 2>/dev/null | tee -a build.log || echo "bin/ NOT FOUND" | tee -a build.log

@@ -53,15 +53,23 @@ jobs:
           BUILDOZER_WARN_ON_ROOT: "0"
         run: |
           set -eo pipefail
-          export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java))))
+          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export PATH=$PATH:~/.local/bin
-          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          export SDK="$HOME/.buildozer/android/platform/android-sdk"
+          # 关键：让 sdkmanager 把 license 写到 Buildozer 认的同一个 SDK 目录
+          export ANDROID_SDK_ROOT="$SDK"
+          export ANDROID_HOME="$SDK"
           # 第一次构建：触发 SDK/NDK 下载（干净环境会在 license 处失败，忽略）
           python -m buildozer android debug 2>&1 | tee /tmp/b1.log || true
           # 显式接受所有 Android SDK license（绕过 buildozer 自动接受失效）
-          if [ -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          # 必须带 ANDROID_SDK_ROOT，否则 license 会写到错误目录，buildozer 仍读不到
+          SDKMANAGER=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1)
+          echo "sdkmanager = ${SDKMANAGER:-NOT FOUND}"
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses
           fi
+          # 确认 build-tools 已就绪
+          ls -la "$SDK/build-tools" 2>/dev/null || echo "build-tools 仍未就绪"
           # 第二次构建：SDK 已就绪且 license 已接受，进入真实编译
           python -m buildozer -v android debug 2>&1 | tee build.log
           echo "=== bin/ 内容 ==="

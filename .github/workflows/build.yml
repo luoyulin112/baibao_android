@@ -64,26 +64,26 @@ jobs:
           export ANDROID_HOME="$SDK"
           : > build.log
 
-          # 第一次构建：触发 cmdline-tools/SDK 结构下载（license 处失败，忽略）
-          python -m buildozer android debug >> build.log 2>&1 || true
-
-          # 定位 buildozer 实际使用的 sdkmanager（优先 tools/bin）
+          # 先手动接受 license（让 buildozer 第一次跑不被 license 卡住，能跑到解压 python3 源码）
           SDKMANAGER="$SDK/tools/bin/sdkmanager"
           if [ ! -x "$SDKMANAGER" ]; then
             SDKMANAGER=$(find "$SDK" -name sdkmanager -type f 2>/dev/null | head -1)
           fi
           echo "USING sdkmanager = ${SDKMANAGER:-NOT FOUND}" | tee -a build.log
-
-          # 关键：必须显式 --sdk_root，否则新版 sdkmanager 会把 license 写到别处，
-          # 而 buildozer 内部用 --sdk_root=$SDK 去读，两边不一致→判定未接受
-          echo "=== accept all licenses ===" | tee -a build.log
+          echo "=== accept all licenses (pre-buildozer) ===" | tee -a build.log
           yes | "$SDKMANAGER" --licenses --sdk_root="$SDK" 2>&1 | tee -a build.log || true
-          echo "=== licenses dir after accept ===" | tee -a build.log
-          ls -la "$SDK/licenses" 2>/dev/null | tee -a build.log || echo "licenses dir MISSING" | tee -a build.log
-
-          # 预装所需包（license 已接受，不会再弹交互提示）
           echo "=== preinstall packages ===" | tee -a build.log
           "$SDKMANAGER" --sdk_root="$SDK" "platform-tools" "build-tools;34.0.0" "platforms;android-34" 2>&1 | tee -a build.log || true
+
+          # 第一次构建：让 p4a 解压所有 recipe 源码（包括 python3 3.11.9）。
+          # 即使最终在 grpmodule.c 编译失败，源码也已解压到 build/other_builds/python3/<arch>/python3/。
+          python -m buildozer android debug >> build.log 2>&1 || true
+
+          # 关键：在 buildozer 第二次跑之前 patch 已解压的 grpmodule.c，
+          # 把 setgrent/getgrent/endgrent 调用包进 #if 0（Android Bionic libc 没实现这些）。
+          # 第二次 buildozer 跑时 p4a 检测 python3 源码已存在会跳过 unpack，用 patch 过的源码继续。
+          echo "=== patch grpmodule.c (grp module disabled for Android) ===" | tee -a build.log
+          python .github/scripts/patch_grpmodule.py 2>&1 | tee -a build.log || true
 
           # 真正编译
           echo "=== real build ===" | tee -a build.log

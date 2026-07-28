@@ -107,7 +107,6 @@ jobs:
             BUILD_PY="$P4A_DIR/pythonforandroid/build.py"
             echo "=== patch p4a: neutralize ALL forced pip self-upgrades ===" | tee -a build.log
             find "$P4A_DIR" -name '*.py' -print0 | xargs -0 sed -i -E 's/(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip/true/g'
-            echo "remaining forced pip-upgrade occurrences: $(grep -rcE '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$P4A_DIR" 2>/dev/null | grep -v ':0' | head || true)" | tee -a build.log
 
             echo "=== patch p4a: build run_pymodules_install venv with build-machine python ===" | tee -a build.log
             # root cause: run_pymodules_install uses the cross-built host_python to run
@@ -120,8 +119,21 @@ jobs:
             sed -i -E "s/shprint(host_python, '-m', 'venv', 'venv')/shprint(sh.Command(sys.executable), '-m', 'venv', '--clear', 'venv')/" "$BUILD_PY"
             grep -q "sh.Command(sys.executable)" "$BUILD_PY" || { echo "PATCH FAILED: venv-creation line not patched"; exit 1; }
             echo "venv-creation patched: $(grep -n "sys.executable" "$BUILD_PY" | head -1)" | tee -a build.log
-            # 再次锁定 host pip，防止第一次构建里 recipe 编译阶段把它顶到坏版本。
+
+            # FORCE recompile of patched p4a sources: the first build already imported
+            # pythonforandroid.build and wrote a compiled __pycache__/*.pyc that STILL
+            # contains the ORIGINAL `pip install -U pip`. Python would otherwise keep
+            # executing that stale bytecode (grep of the .pyc confirmed it), so the sed
+            # above never takes effect and the venv pip still gets upgraded to the
+            # broken 25.x -> "ImportError: cannot import name 'RequirementInformation'".
+            # Dropping the bytecode guarantees p4a recompiles from the patched source.
+            find "$P4A_DIR" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+
+            # again lock host pip (cheap, idempotent) and verify the patch truly landed
+            # in source and that no stale .pyc remains to override it.
             python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
+            echo "remaining forced pip-upgrade occurrences in .py: $(grep -rlE --include='*.py' '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$P4A_DIR" 2>/dev/null | head || true)" | tee -a build.log
+            echo "remaining stale __pycache__ dirs (should be none): $(find "$P4A_DIR" -name '__pycache__' -type d | head || true)" | tee -a build.log
 
             # 修复 AAB 版本门槛误报：p4a 是从 git 克隆的（未被 pip 安装），其
             # __version__ 会回退成 "0.0.0"，导致 buildozer 的 AAB 支持门槛

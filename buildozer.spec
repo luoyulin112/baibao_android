@@ -16,7 +16,7 @@ source.exclude_exts = spec,db
 source.exclude_dirs = .venv,__pycache__,tests
 
 # (list) 应用要求（python3 + kivy）
-requirements = python3==3.11.9, kivy==2.3.1
+requirements = hostpython3==3.11.9, python3==3.11.9, kivy==2.3.1
 
 # (str) 应用主类（Kivy App 类名，buildozer 会自动找 main.py 里的 App）
 # 不填时 buildozer 默认加载 main.py 中第一个 App 子类

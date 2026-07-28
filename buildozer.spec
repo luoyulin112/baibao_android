@@ -39,6 +39,10 @@ android.build_tools_version = 34.0.0
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
 android.accept_licenses = True
 
+# 本地 p4a recipes：在编译 python3 前 patch grpmodule.c，跳过 Android Bionic libc
+# 不支持的 setgrent/getgrent/endgrent（cpython 3.11.9 函数体未 #ifdef 包裹）
+android.p4a.local_recipes = p4a_recipes
+
 # (bool) 是否显示启动图
 android.private_storage = True
 android.start_service = False

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Patch python-for-android 解压后的 python3 3.11.9 源码中的 Modules/grpmodule.c，
+Patch p4a 解压后的 cpython 3.11.9 源码中的 Modules/grpmodule.c，
 把 grp_getgrall_impl 里的 setgrent() / getgrent() / endgrent() 调用用 #if 0 包起来，
 跳过对 Android Bionic libc 不存在的 POSIX groups 迭代 API。
 
@@ -9,8 +9,11 @@ setgrent/getgrent/endgrent。configure 时 AC_CHECK_FUNCS 在 Android NDK sysroo
 （grp.h stub 声明存在）→ 编译时 -Werror=implicit-function-declaration 直接失败。
 我们的 App 不使用 grp 模块，禁掉整个函数体对功能无影响。
 
-用法：在 build.yml 中每次 python -m buildozer 跑前调用一次本脚本（patch 已 patch
-过的文件是 no-op，幂等）。
+调用时机：必须等 p4a 把 cpython 3.11.9 源码解压到
+~/.buildozer/android/platform/build-<arch>/build/other_builds/python3/<arch>/python3/Modules/grpmodule.c
+之后再跑（即 buildozer 第一次跑完之后）。脚本本身幂等。
+
+用法：在 build.yml 的 Build APK 步，buildozer 第一次跑后、第二次跑前调用。
 """
 
 import glob
@@ -18,34 +21,32 @@ import os
 import sys
 
 
+# 与 p4a_recipes/python3/__init__.py 保持一致的锚点
+_ANCHOR_OPEN = "        return NULL;\n    setgrent();"
+_REPLACEMENT_OPEN = (
+    "        return NULL;\n"
+    "#if 0  /* grp disabled for Android: Bionic libc lacks "
+    "setgrent/getgrent/endgrent */\n"
+    "    setgrent();"
+)
+_ANCHOR_CLOSE = "    endgrent();\n    return d;\n}"
+_REPLACEMENT_CLOSE = "    endgrent();\n#endif\n    return d;\n}"
+_MARKER = "grp disabled for Android"
+
+
 def patch_one(path: str) -> bool:
     """对一个 grpmodule.c 做幂等 patch，返回是否真正修改过。"""
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         src = f.read()
-    if "grp disabled for Android" in src:
-        # 已 patch
+    if _MARKER in src:
         return False
 
-    # 锚点 1：setgrent(); 前面加 #if 0
-    anchor_open = "        return NULL;\n    setgrent();"
-    replacement_open = (
-        "        return NULL;\n"
-        "#if 0  /* grp disabled for Android: Bionic libc lacks "
-        "setgrent/getgrent/endgrent */\n"
-        "    setgrent();"
+    if _ANCHOR_OPEN not in src or _ANCHOR_CLOSE not in src:
+        return False
+
+    new_src = src.replace(_ANCHOR_OPEN, _REPLACEMENT_OPEN, 1).replace(
+        _ANCHOR_CLOSE, _REPLACEMENT_CLOSE, 1
     )
-    if anchor_open not in src:
-        # 文件不是预期的 3.11.x 结构，跳过
-        return False
-    new_src = src.replace(anchor_open, replacement_open, 1)
-
-    # 锚点 2：在末尾 endgrent();\n    return d;\n} 之后插入 #endif
-    anchor_close = "    endgrent();\n    return d;\n}"
-    replacement_close = "    endgrent();\n#endif\n    return d;\n}"
-    if anchor_close not in new_src:
-        return False
-    new_src = new_src.replace(anchor_close, replacement_close, 1)
-
     if new_src == src:
         return False
 
@@ -55,7 +56,9 @@ def patch_one(path: str) -> bool:
 
 
 def main() -> int:
-    base = os.path.expanduser(os.environ.get("BUILDOZER_HOME", "~/.buildozer"))
+    base = os.path.expanduser(
+        os.environ.get("BUILDOZER_HOME", "~/.buildozer")
+    )
     patched = 0
     candidates = glob.glob(
         os.path.join(base, "**", "Modules", "grpmodule.c"), recursive=True

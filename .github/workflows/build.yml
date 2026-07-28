@@ -105,27 +105,21 @@ jobs:
           echo "P4A_DIR=${P4A_DIR:-NOT FOUND}" | tee -a build.log
           if [ -n "$P4A_DIR" ]; then
             BUILD_PY="$P4A_DIR/pythonforandroid/build.py"
-            echo "=== patch p4a build.py (disable forced pip self-upgrade) ===" | tee -a build.log
-            sed -i -E 's/(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip/true/g' "$BUILD_PY"
-            echo "remaining forced pip-upgrade occurrences: $(grep -cE '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$BUILD_PY" || true)" | tee -a build.log
-            # 关键修复：p4a 用 `python -m venv` 建隔离 venv，其 pip 来自 runner Python
-            # 自带的 bundled pip（3.11.15 -> pip 25.x，resolvelib 已删除
-            # RequirementInformation，导致后续 `pip install` 直接 ImportError）。
-            # 之前的 sed 只把“pip install -U pip”变成 true（阻止升级），但 venv 基础
-            # pip 仍是坏的 25.x。这里把第一次构建生成的 venv 彻底重建：用 --without-pip
-            # 建空 venv，再用 get-pip.py 显式装回已知可用的 pip==23.3.2（其 vendored
-            # resolvelib 仍导出 RequirementInformation）。第二次构建会复用这个健康 venv。
-            # （host Python 已锁 3.11.9，bundled pip 24.0，作为 p4a 万一重建 venv 的兜底。）
-            curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-            while IFS= read -r V; do
-              [ -z "$V" ] && continue
-              BD=$(dirname "$V")
-              rm -rf "$V"
-              python -m venv --without-pip "$V"
-              "$V/bin/python" /tmp/get-pip.py "pip==23.3.2" 2>&1 | tail -3 | tee -a build.log
-              echo "rebuilt venv $V -> $("$V/bin/pip" --version 2>&1)" | tee -a build.log
-            done < <(find .buildozer -type d -name venv 2>/dev/null)
-            echo "rebuilt all p4a venv(s) with pip==23.3.2" | tee -a build.log
+            echo "=== patch p4a: neutralize ALL forced pip self-upgrades ===" | tee -a build.log
+            find "$P4A_DIR" -name '*.py' -print0 | xargs -0 sed -i -E 's/(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip/true/g'
+            echo "remaining forced pip-upgrade occurrences: $(grep -rcE '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$P4A_DIR" 2>/dev/null | grep -v ':0' | head || true)" | tee -a build.log
+
+            echo "=== patch p4a: build run_pymodules_install venv with build-machine python ===" | tee -a build.log
+            # root cause: run_pymodules_install uses the cross-built host_python to run
+            #   `host_python -m venv venv`
+            # but hostpython3(desktop) stdlib lacks a runnable venv.__main__ ->
+            #   "No module named venv.__main__". That venv only installs pure-python
+            # deps (certifi/requests/...) into the android site-packages, so creating
+            # it with the build-machine python (sys.executable, full venv) is correct;
+            # --clear keeps it idempotent across rebuilds.
+            sed -i -E "s/shprint(host_python, '-m', 'venv', 'venv')/shprint(sh.Command(sys.executable), '-m', 'venv', '--clear', 'venv')/" "$BUILD_PY"
+            grep -q "sh.Command(sys.executable)" "$BUILD_PY" || { echo "PATCH FAILED: venv-creation line not patched"; exit 1; }
+            echo "venv-creation patched: $(grep -n "sys.executable" "$BUILD_PY" | head -1)" | tee -a build.log
             # 再次锁定 host pip，防止第一次构建里 recipe 编译阶段把它顶到坏版本。
             python -m pip install --upgrade --force-reinstall --no-cache-dir "pip==23.3.2"
 

@@ -5,6 +5,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+# 发布 Release（含诊断日志）需要写权限
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git zip unzip openjdk-17-jdk \
+            git zip unzip openjdk-17-jdk build-essential \
             python3-pip autoconf libtool pkg-config \
             zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev
 
@@ -40,20 +44,22 @@ jobs:
           # 避免交互式提示
           BUILDOZER_WARN_ON_ROOT: "0"
         run: |
+          set -eo pipefail
           export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export PATH=$PATH:~/.local/bin
           python -m buildozer android debug 2>&1 | tee build.log
-
-      - name: Show build log on failure
-        if: failure()
-        run: tail -n 80 build.log
+          echo "=== bin/ 内容 ==="
+          ls -la bin/ 2>/dev/null || echo "bin/ 不存在"
+          echo "=== 全盘查找 apk ==="
+          find . -name '*.apk' 2>/dev/null || true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: baibao-android-apk
-          path: bin/*.apk
-          if-no-files-found: error
+          path: "**/*.apk"
+          if-no-files-found: warn
 
       # 自动发布到 Release（固定 tag=apk，覆盖更新），方便国内走镜像下载
       - name: Publish Release APK
@@ -62,7 +68,20 @@ jobs:
         with:
           tag_name: apk
           name: Baibao Debug APK
-          files: bin/*.apk
+          files: "**/*.apk"
           overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 构建失败时把编译日志作为公开资产发布，便于定位（无需认证的下载链接）
+      - name: Publish diagnostic log (on failure)
+        if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: diag
+          name: Build diagnostics
+          files: build.log
+          overwrite: true
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

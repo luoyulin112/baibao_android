@@ -26,7 +26,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git zip unzip openjdk-17-jdk build-essential \
-            python3-pip autoconf libtool pkg-config \
+            python3-pip autoconf automake libtool libtool-bin libltdl-dev gettext pkg-config \
             zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev \
             libsqlite3-dev libbz2-dev libreadline-dev liblzma-dev xz-utils
 
@@ -56,6 +56,9 @@ jobs:
           set -eo pipefail
           export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
           export PATH=$PATH:~/.local/bin
+          # 强制 aclocal 找到 libtool 宏：libffi (LIBFFI_ENABLE_SYMVERS) 会触发 LT_SYS_SYMBOL_USCORE
+          # Ubuntu 24.04 上该宏依赖 libtool-bin / libltdl-dev 提供，这里兜底把 /usr/share/aclocal 置入搜索路径
+          export ACLOCAL_PATH="$(aclocal --print-ac-dir 2>/dev/null):/usr/share/aclocal:/usr/share/aclocal-1.16"
           export SDK="$HOME/.buildozer/android/platform/android-sdk"
           export ANDROID_SDK_ROOT="$SDK"
           export ANDROID_HOME="$SDK"

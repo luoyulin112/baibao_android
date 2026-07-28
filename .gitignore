@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Buildozer / APK 产物（由 CI 生成，不入库）
+.buildozer/
+bin/
+*.apk
+
+# 本地数据
+*.db

@@ -36,10 +36,17 @@ jobs:
         run: python selftest.py
 
       - name: Build APK (debug)
-        run: buildozer android debug
         env:
           # 避免交互式提示
           BUILDOZER_WARN_ON_ROOT: "0"
+        run: |
+          export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+          export PATH=$PATH:~/.local/bin
+          python -m buildozer android debug 2>&1 | tee build.log
+
+      - name: Show build log on failure
+        if: failure()
+        run: tail -n 80 build.log
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

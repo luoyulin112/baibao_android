@@ -33,6 +33,9 @@ android.minapi = 24
 android.ndk = 25b
 android.sdk = 34
 
+# CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
+android.accept_licenses = True
+
 # (bool) 是否显示启动图
 android.private_storage = True
 android.start_service = False
@@ -49,5 +52,5 @@ log_level = 2
 build_dir = .buildozer
 
 # (bool) 是否清理过期构建
-# 设为 True 会在每次构建前清缓存，首包慢但稳定
-android.clean_build = True
+# CI 上每次都是全新虚拟机，设为 False 避免反复重新下载 SDK/NDK（更快更稳）
+android.clean_build = False

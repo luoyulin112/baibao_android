@@ -49,3 +49,15 @@ jobs:
           name: baibao-android-apk
           path: bin/*.apk
           if-no-files-found: error
+
+      # 自动发布到 Release（固定 tag=apk，覆盖更新），方便国内走镜像下载
+      - name: Publish Release APK
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: apk
+          name: Baibao Debug APK
+          files: bin/*.apk
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

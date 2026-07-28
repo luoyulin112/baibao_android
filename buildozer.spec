@@ -39,12 +39,11 @@ android.build_tools_version = 34.0.0
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
 android.accept_licenses = True
 
-# 本地 p4a recipes：编译 python3 前 patch grpmodule.c，跳过 Android Bionic libc
-# 不支持的 setgrent/getgrent/endgrent（cpython 3.11.9 函数体未 #ifdef 包裹）。
-# buildozer 把 requirements.source.<X> 转成 P4A_X_DIR 环境变量传给 p4a，加载本地 recipe
-# 覆盖默认的同名 recipe。注意：必须放在 [app] 段下，且值为 recipe 目录路径
-# （不是文件路径），目录里需要包含 __init__.py。
-requirements.source.python3 = p4a_recipes/python3
+# grpmodule.c patch 不通过 spec 选项实现（buildozer 1.5.x 没暴露 local_recipe 机制），
+# 而是放到 .github/workflows/build.yml 里：buildozer 第一次跑让 p4a 把 python3 源码
+# 解压完整（grp 编译失败也无妨），第二次跑前用 .github/scripts/patch_grpmodule.py
+# 在解压后的 grpmodule.c 里 wrap setgrent/getgrent/endgrent 为 #if 0，p4a 第二次跑
+# 检测源码已存在会跳过 unpack，用已 patch 源码继续编译通过。
 
 # (bool) 是否显示启动图
 android.private_storage = True

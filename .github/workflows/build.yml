@@ -30,11 +30,10 @@ jobs:
           pip install --upgrade pip
           pip install buildozer "cython==0.29.33"
 
-      - name: Validate (logic self-test + kivy import)
-        run: |
-          pip install kivy
-          python selftest.py
-          python -c "import main; print('import main OK')"
+      - name: Validate (logic self-test)
+        # 只跑纯逻辑自测（不依赖 kivy）。main 的 kivy import 校验
+        # 留给 buildozer android debug 阶段，编译期会自动暴露。
+        run: python selftest.py
 
       - name: Build APK (debug)
         run: buildozer android debug

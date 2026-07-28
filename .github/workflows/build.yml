@@ -106,8 +106,8 @@ jobs:
           if [ -n "$P4A_DIR" ]; then
             BUILD_PY="$P4A_DIR/pythonforandroid/build.py"
             echo "=== patch p4a build.py (disable forced pip self-upgrade) ===" | tee -a build.log
-            sed -i -E 's/(pip3?|python -m pip) install -U pip/true/g' "$BUILD_PY"
-            echo "remaining forced pip-upgrade occurrences: $(grep -cE '(pip3?|python -m pip) install -U pip' "$BUILD_PY" || true)" | tee -a build.log
+            sed -i -E 's/(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip/true/g' "$BUILD_PY"
+            echo "remaining forced pip-upgrade occurrences: $(grep -cE '(pip3?|python[0-9]* -m pip)[[:space:]]+install[[:space:]]+(-U|--upgrade)[[:space:]]+pip' "$BUILD_PY" || true)" | tee -a build.log
             # 删掉上一次已生成、可能已被升级成损坏版本的 venv，让第二次构建用健康的基础
             # pip(23.3.2) 重新创建。
             find .buildozer -type d -name venv -exec rm -rf {} + 2>/dev/null || true

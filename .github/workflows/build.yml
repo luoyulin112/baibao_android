@@ -92,7 +92,20 @@ jobs:
           # 不再需要在构建脚本里 sed 改 p4a 源码（buildozer 每次构建都会 git 复位 p4a，
           # 之前的 sed 补丁必然被撤销，这正是连续多次构建都失败的根因）。
           echo "=== build (p4a fork neutralizes the fatal pip self-upgrade) ===" | tee -a build.log
+          # 注意：不要直接用 `yes | buildozer | tee` 在 pipefail 下裸跑——buildozer 正常
+          # 退出后，前面的 yes 会因管道关闭收到 SIGPIPE(141)，pipefail 会把它当作整条管道
+          # 的退出码，造成“构建其实成功、步骤却被判失败”的假失败（run #32 就是此情形）。
+          # 这里临时关掉 pipefail，显式取 buildozer 自身的退出码(PIPESTATUS[1])来判定，
+          # 只忽略 yes 的 SIGPIPE，真实构建错误仍会准确暴露并令步骤失败。
+          set +o pipefail
           yes | python -m buildozer -v android debug 2>&1 | tee -a build.log
+          BUILD_RC=${PIPESTATUS[1]}
+          set -o pipefail
+          echo "=== buildozer exit code: $BUILD_RC ===" | tee -a build.log
+          if [ "$BUILD_RC" -ne 0 ]; then
+            echo "!!! buildozer failed with rc=$BUILD_RC" | tee -a build.log
+            exit "$BUILD_RC"
+          fi
           echo "=== bin/ ===" | tee -a build.log
           ls -la bin/ 2>/dev/null | tee -a build.log || echo "bin/ NOT FOUND" | tee -a build.log
           find . -name '*.apk' 2>/dev/null | tee -a build.log

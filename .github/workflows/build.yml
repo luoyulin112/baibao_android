@@ -92,19 +92,14 @@ jobs:
           # 不再需要在构建脚本里 sed 改 p4a 源码（buildozer 每次构建都会 git 复位 p4a，
           # 之前的 sed 补丁必然被撤销，这正是连续多次构建都失败的根因）。
           echo "=== build (p4a fork neutralizes the fatal pip self-upgrade) ===" | tee -a build.log
-          # 第一次跑：下载并编译 SDL2 源码（FORTIFY=2，失败无关），为补丁与重编做准备
-          set +o pipefail
-          yes | python -m buildozer android debug 2>&1 | tee -a build.log || true
-          set -o pipefail
-          # 关闭 bionic FORTIFY：NDK r25+ 默认 FORTIFY=2，SDL2 对已销毁 mutex 上锁会被拦截成 SIGABRT 启动崩溃
-          echo "=== patch: disable bionic FORTIFY for SDL2/native ===" | tee -a build.log
-          find "$HOME/.buildozer" -name Application.mk | xargs -I{} sh -c 'grep -q FORTIFY_SOURCE=0 "{}" || echo "APP_CFLAGS += -D_FORTIFY_SOURCE=0" >> "{}"' 2>/dev/null || true
-          echo "patched Application.mk: $(find "$HOME/.buildozer" -name Application.mk | wc -l)" | tee -a build.log
-          echo "=== force SDL2/native recompile (drop FORTIFY=2 artifacts) ===" | tee -a build.log
-          find "$HOME/.buildozer" -iname '*sdl2*' -name '*.o' -delete 2>/dev/null || true
-          find "$HOME/.buildozer" -iname '*sdl2*' -name '*.a' -delete 2>/dev/null || true
-          find "$HOME/.buildozer" -iname '*sdl2*' -name '*.so' -delete 2>/dev/null || true
-          # 真正构建（SDL2 重新编译为 FORTIFY=0）
+          # 关闭 bionic FORTIFY：NDK r25+ 默认 _FORTIFY_SOURCE=2，SDL2 对已销毁 mutex 上锁会被
+          # 拦截成 SIGABRT 启动崩溃。p4a 用 CMake 编译 SDL2（不走 ndk-build 的 Application.mk 方式），
+          # 因此必须把开关经 CFLAGS/CXXFLAGS/CPPFLAGS 与 android.add_compile_options 两条路都注入，
+          # 确保真正进到 SDL2 的编译命令行（之前改 Application.mk 的 patch 是假生效，已移除）。
+          export CFLAGS="${CFLAGS:-} -D_FORTIFY_SOURCE=0"
+          export CXXFLAGS="${CXXFLAGS:-} -D_FORTIFY_SOURCE=0"
+          export CPPFLAGS="${CPPFLAGS:-} -D_FORTIFY_SOURCE=0"
+          echo "=== build (disable bionic FORTIFY via flags + add_compile_options) ===" | tee -a build.log
           set +o pipefail
           yes | python -m buildozer -v android debug 2>&1 | tee -a build.log
           BUILD_RC=${PIPESTATUS[1]}
@@ -139,8 +134,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 构建失败时把编译日志作为公开资产发布，便于定位（无需认证的下载链接）
-      - name: Publish diagnostic log (on failure)
-        if: failure()
+      - name: Publish diagnostic log
+        if: always()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: diag

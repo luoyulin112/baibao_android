@@ -44,8 +44,7 @@ android.permissions =
 # (int) Android API
 android.api = 34
 android.minapi = 24
-# fix: NDK r25+ 默认 _FORTIFY_SOURCE 会把 SDL2 对已销毁 mutex 上锁变成 SIGABRT 闪退；降到 r23b 规避
-android.ndk = 23b
+android.ndk = 25b
 android.build_tools_version = 34.0.0
 
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）

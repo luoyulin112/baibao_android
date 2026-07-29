@@ -16,6 +16,28 @@ import json
 
 import logic
 import store
+import traceback
+
+# 顶层异常捕获：把未捕获异常的完整 traceback 写到 crash.txt，
+# 便于在 Android 上闪退时从手机文件取回错误（无需 adb）。
+# 会依次尝试脚本目录、当前工作目录，任一可写即写入。
+def _install_crash_logger():
+    def _hook(exc_type, exc_val, exc_tb):
+        tb = "".join(traceback.format_exception(exc_type, exc_val, exc_tb))
+        for cand in (os.path.dirname(os.path.abspath(__file__)), os.getcwd()):
+            try:
+                with open(os.path.join(cand, "crash.txt"), "w", encoding="utf-8") as f:
+                    f.write(tb)
+                break
+            except Exception:
+                continue
+        try:
+            sys.__excepthook__(exc_type, exc_val, exc_tb)
+        except Exception:
+            pass
+    sys.excepthook = _hook
+
+_install_crash_logger()
 
 # 在导入 kivy 之前处理 --selftest（kivy 会在 import 时读取 sys.argv，
 # 否则 --selftest 会被 kivy 的命令行解析拦截）

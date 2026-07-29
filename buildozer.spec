@@ -47,6 +47,10 @@ android.minapi = 24
 android.ndk = 25b
 android.build_tools_version = 34.0.0
 
+# 关闭 bionic FORTIFY：NDK r25+ 默认 _FORTIFY_SOURCE=2，SDL2 对已销毁 mutex 上锁会被
+# 拦截成 SIGABRT 启动崩溃。通过 add_compile_options 注入（p4a 会传到 CMake 的 CMAKE_C/CXX_FLAGS）。
+android.add_compile_options = -D_FORTIFY_SOURCE=0
+
 # CI 编译必须自动接受 SDK 许可协议（否则 buildozer 在干净 Linux 上会卡住报错）
 android.accept_licenses = True
 

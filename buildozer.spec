@@ -48,8 +48,9 @@ android.ndk = 25b
 android.build_tools_version = 34.0.0
 
 # 关闭 bionic FORTIFY：NDK r25+ 默认 _FORTIFY_SOURCE=2，SDL2 对已销毁 mutex 上锁会被
-# 拦截成 SIGABRT 启动崩溃。通过 add_compile_options 注入（p4a 会传到 CMake 的 CMAKE_C/CXX_FLAGS）。
-android.add_compile_options = -D_FORTIFY_SOURCE=0
+# 拦截成 SIGABRT 启动崩溃。该开关经 workflow 里 export CFLAGS/CXXFLAGS/CPPFLAGS=-D_FORTIFY_SOURCE=0
+# 注入（不走 android.add_compile_options：其值以 - 开头会被 p4a 的 argparse 误判为开关，报
+# "expected one argument" 直接中断构建）。CFLAGS 已验证能传到 host gcc 与 NDK clang 编译。
 
 # 只编 arm64-v8a（手机足够），避免默认同时编 arm64-v8a + armeabi-v7a 导致免费 runner OOM 被杀
 android.arch = arm64-v8a

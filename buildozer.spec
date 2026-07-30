@@ -26,8 +26,9 @@ requirements = hostpython3==3.11.9, python3==3.11.9, kivy==2.3.1
 # resolvelib 1.0.1 仍导出 RequirementInformation，自洽）。buildozer 按此分支
 # 检出，git 复位也不会撤销修复（这是之前在 build.yml 里 sed 改 p4a 源码必败的
 # 根因：buildozer 每次构建都会对 p4a 做 checkout/reset，撤销 sed 补丁）。
-p4a.url = https://github.com/luoyulin112/python-for-android.git
+p4a.url = https://github.com/kivy/python-for-android.git
 p4a.branch = master
+p4a.local_recipes = p4a_recipes
 
 # (str) 应用主类（Kivy App 类名，buildozer 会自动找 main.py 里的 App）
 # 不填时 buildozer 默认加载 main.py 中第一个 App 子类

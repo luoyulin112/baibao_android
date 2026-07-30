@@ -93,16 +93,24 @@ jobs:
           # 之前的 sed 补丁必然被撤销，这正是连续多次构建都失败的根因）。
           echo "=== build (p4a fork neutralizes the fatal pip self-upgrade) ===" | tee -a build.log
           # 关闭 bionic FORTIFY：NDK r25+ 默认 _FORTIFY_SOURCE=2，SDL2 对已销毁 mutex 上锁会被
-          # 拦截成 SIGABRT 启动崩溃。p4a 用 CMake 编译 SDL2（不走 ndk-build 的 Application.mk 方式），
-          # 因此必须把开关经 CFLAGS/CXXFLAGS/CPPFLAGS 与 android.add_compile_options 两条路都注入，
-          # 确保真正进到 SDL2 的编译命令行（之前改 Application.mk 的 patch 是假生效，已移除）。
+          # 拦截成 SIGABRT 启动崩溃。关键事实：p4a 用 ndk-build 编译 SDL2（只读 Application.mk 的
+          # APP_CFLAGS），完全忽略 CFLAGS 环境变量，所以光 export CFLAGS 对 SDL2 无效。
+          # 修法：构建前 patch 已安装的 p4a SDL2 recipe，让它在 ndk-build 前给 Application.mk
+          # 追加 APP_CFLAGS/APP_CPPFLAGS += -D_FORTIFY_SOURCE=0，并强制 SDL2 重新编译。
           # 限制并行编译，压低内存峰值，避免免费 runner 被 OOM 杀掉
           export MAKEFLAGS="-j2"
           export CMAKE_BUILD_PARALLEL_LEVEL=2
+          # env CFLAGS 对 Python 扩展等仍有效（无害），但对 SDL2 无效——SDL2 走 ndk-build
           export CFLAGS="${CFLAGS:-} -D_FORTIFY_SOURCE=0"
           export CXXFLAGS="${CXXFLAGS:-} -D_FORTIFY_SOURCE=0"
           export CPPFLAGS="${CPPFLAGS:-} -D_FORTIFY_SOURCE=0"
-          echo "=== build (disable bionic FORTIFY via flags + add_compile_options) ===" | tee -a build.log
+          # Patch p4a SDL2 recipe so ndk-build's Application.mk gets -D_FORTIFY_SOURCE=0
+          PY_SITE=$(python -c "import pythonforandroid,os;print(os.path.dirname(pythonforandroid.__file__))")
+          echo 'aW1wb3J0IHN5cywgb3MKcCA9IHN5cy5hcmd2WzFdCnMgPSBvcGVuKHApLnJlYWQoKQphID0gJ3dpdGggY3VycmVudF9kaXJlY3Rvcnkoc2VsZi5nZXRfam5pX2RpcigpKTonCmlmICdGT1JUSUZZX1NPVVJDRT0wJyBub3QgaW4gczoKICAgIGluaiA9ICgKICAgICAgICAnICAgICAgICBpbXBvcnQgb3MgYXMgX29zCicKICAgICAgICAnICAgICAgICBfYW1rID0gX29zLnBhdGguam9pbihzZWxmLmdldF9qbmlfZGlyKCksICJBcHBsaWNhdGlvbi5tayIpCicKICAgICAgICAnICAgICAgICBpZiBfb3MucGF0aC5leGlzdHMoX2Ftayk6CicKICAgICAgICAnICAgICAgICAgICAgX2MgPSBvcGVuKF9hbWspLnJlYWQoKQonCiAgICAgICAgJyAgICAgICAgICAgIGlmICItRF9GT1JUSUZZX1NPVVJDRT0wIiBub3QgaW4gX2M6CicKICAgICAgICAnICAgICAgICAgICAgICAgIF9jICs9ICIKQVBQX0NGTEFHUyArPSAtRF9GT1JUSUZZX1NPVVJDRT0wCkFQUF9DUFBGTEFHUyArPSAtRF9GT1JUSUZZX1NPVVJDRT0wCiIKJwogICAgICAgICcgICAgICAgICAgICAgICAgb3BlbihfYW1rLCAidyIpLndyaXRlKF9jKQonCiAgICApCiAgICBzID0gcy5yZXBsYWNlKGEsIGluaiArIGEsIDEpCiAgICBvcGVuKHAsICd3Jykud3JpdGUocykKICAgIHByaW50KCdwYXRjaGVkIFNETDIgcmVjaXBlOicsIHApCmVsc2U6CiAgICBwcmludCgnU0RMMiByZWNpcGUgYWxyZWFkeSBwYXRjaGVkJykK' | base64 -d > /tmp/patch_sdl.py
+          python /tmp/patch_sdl.py "$PY_SITE/recipes/sdl2/__init__.py"
+          # Force SDL2 recompile so the patched Application.mk actually takes effect
+          find ~/.buildozer -name 'libSDL2*.so' -delete 2>/dev/null || true
+          echo "=== build (patch p4a SDL2 recipe: -D_FORTIFY_SOURCE=0 into ndk-build Application.mk) ===" | tee -a build.log
           set +o pipefail
           yes | python -m buildozer -v android debug 2>&1 | tee -a build.log
           BUILD_RC=${PIPESTATUS[1]}

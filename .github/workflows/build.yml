@@ -96,6 +96,9 @@ jobs:
           # 拦截成 SIGABRT 启动崩溃。p4a 用 CMake 编译 SDL2（不走 ndk-build 的 Application.mk 方式），
           # 因此必须把开关经 CFLAGS/CXXFLAGS/CPPFLAGS 与 android.add_compile_options 两条路都注入，
           # 确保真正进到 SDL2 的编译命令行（之前改 Application.mk 的 patch 是假生效，已移除）。
+          # 限制并行编译，压低内存峰值，避免免费 runner 被 OOM 杀掉
+          export MAKEFLAGS="-j2"
+          export CMAKE_BUILD_PARALLEL_LEVEL=2
           export CFLAGS="${CFLAGS:-} -D_FORTIFY_SOURCE=0"
           export CXXFLAGS="${CXXFLAGS:-} -D_FORTIFY_SOURCE=0"
           export CPPFLAGS="${CPPFLAGS:-} -D_FORTIFY_SOURCE=0"

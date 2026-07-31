@@ -100,9 +100,6 @@ jobs:
           # 限制并行编译，压低内存峰值，避免免费 runner 被 OOM 杀掉
           export MAKEFLAGS="-j2"
           export CMAKE_BUILD_PARALLEL_LEVEL=2
-          export CFLAGS="${CFLAGS:-} -D_FORTIFY_SOURCE=0"
-          export CXXFLAGS="${CXXFLAGS:-} -D_FORTIFY_SOURCE=0"
-          export CPPFLAGS="${CPPFLAGS:-} -D_FORTIFY_SOURCE=0"
           rm -rf ~/.buildozer/android/platform/python-for-android 2>/dev/null || true
           find ~/.buildozer -maxdepth 5 -type d -name python-for-android -exec rm -rf {} + 2>/dev/null || true
           echo "=== build (FORTIFY fix via patched p4a fork; force re-clone) ===" | tee -a build.log

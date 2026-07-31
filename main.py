@@ -256,7 +256,10 @@ class MainScreen(Screen):
         self.add_widget(root)
         # 进入时刷新列表
         Clock_schedule_once(self.refresh_medicines, 0.1)
-        Clock_schedule_once(self.refresh_logs, 0.1)
+        # 注意：Clock.schedule_once 调用回调时会把 dt(0.1) 作为第一个参数传入，
+        # 若直接传 self.refresh_logs 会变成 refresh_logs(0.1)（float），
+        # 进而 store.fetch_logs 把 float 拼进字符串抛 TypeError 闪退。用 lambda 吞掉 dt。
+        Clock_schedule_once(lambda dt: self.refresh_logs(""), 0.1)
 
     def logout(self):
         self.manager.current = "login"

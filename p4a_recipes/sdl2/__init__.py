@@ -32,18 +32,18 @@ class LibSDL2Recipe(BootstrapNDKRecipe):
 
         # 关闭 bionic FORTIFY：NDK r25+ 给 release 编 SDL2 默认启用 _FORTIFY_SOURCE=2，
         # SDL2 对已销毁 mutex 上锁会被 SIGABRT。强制 APP_OPTIM:=debug（NDK 不给 debug 加 FORTIFY）
-        # 并显式 undef FORTIFY_SOURCE 作为双保险。
+        # 用 -U_FORTIFY_SOURCE undef（-D 会与 NDK 默认 -D_FORTIFY_SOURCE=2 冲突，-Werror 下判死）。
         jnidir = self.get_jni_dir()
         amk = join(jnidir, 'Application.mk')
         if exists(amk):
             c = open(amk).read()
-            if "FORTIFY_SOURCE=0" not in c:
+            if "-U_FORTIFY_SOURCE" not in c:
                 c += (
                     "\n"
                     "# Patched by baibao local_recipes: disable bionic FORTIFY (SDL2 destroyed-mutex SIGABRT)\n"
                     "APP_OPTIM := debug\n"
-                    "APP_CFLAGS += -D_FORTIFY_SOURCE=0\n"
-                    "APP_CPPFLAGS += -D_FORTIFY_SOURCE=0\n"
+                    "APP_CFLAGS += -U_FORTIFY_SOURCE\n"
+                    "APP_CPPFLAGS += -U_FORTIFY_SOURCE\n"
                 )
             open(amk, 'w').write(c)
 
